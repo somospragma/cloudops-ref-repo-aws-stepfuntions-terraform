@@ -1,0 +1,118 @@
+{
+  "Comment": "Ejemplo de workflow complejo gestionado en S3",
+  "StartAt": "ValidateInput",
+  "States": {
+    "ValidateInput": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "validate-input-function",
+        "Payload": {
+          "input.$": "$"
+        }
+      },
+      "ResultPath": "$.validation",
+      "Next": "CheckValidation"
+    },
+    "CheckValidation": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.validation.isValid",
+          "BooleanEquals": true,
+          "Next": "ProcessData"
+        }
+      ],
+      "Default": "ValidationFailed"
+    },
+    "ValidationFailed": {
+      "Type": "Fail",
+      "Error": "ValidationError",
+      "Cause": "Input validation failed"
+    },
+    "ProcessData": {
+      "Type": "Parallel",
+      "Branches": [
+        {
+          "StartAt": "ProcessBranch1",
+          "States": {
+            "ProcessBranch1": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "process-branch1-function",
+                "Payload": {
+                  "data.$": "$.data"
+                }
+              },
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "ProcessBranch2",
+          "States": {
+            "ProcessBranch2": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "process-branch2-function",
+                "Payload": {
+                  "data.$": "$.data"
+                }
+              },
+              "End": true
+            }
+          }
+        }
+      ],
+      "ResultPath": "$.processResults",
+      "Next": "AggregateResults"
+    },
+    "AggregateResults": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "aggregate-results-function",
+        "Payload": {
+          "results.$": "$.processResults"
+        }
+      },
+      "ResultPath": "$.aggregated",
+      "Next": "StoreResults"
+    },
+    "StoreResults": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:putItem",
+      "Parameters": {
+        "TableName": "results-table",
+        "Item": {
+          "id": {
+            "S.$": "$.id"
+          },
+          "result": {
+            "S.$": "States.JsonToString($.aggregated)"
+          },
+          "timestamp": {
+            "S.$": "$$.State.EnteredTime"
+          }
+        }
+      },
+      "ResultPath": "$.storeResult",
+      "Next": "SendNotification"
+    },
+    "SendNotification": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "arn:aws:sns:us-east-1:123456789012:workflow-notifications",
+        "Message": {
+          "status": "completed",
+          "id.$": "$.id",
+          "result.$": "$.aggregated"
+        }
+      },
+      "End": true
+    }
+  }
+}
